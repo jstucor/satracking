@@ -1,0 +1,228 @@
+Gpredict & MD-03 Rotator Setup Guide (Ubuntu 25)
+This guide documents the successful steps for setting up Gpredict to control an MD-03 (SPID) rotator via Hamlib on Ubuntu 25 (Plucky Puma). It focuses on the specific methods that proved effective, particularly running rotctld as a standalone daemon.
+
+Table of Contents
+System and Software Overview
+Phase 1: Gpredict Initial Installation
+Phase 2: Hamlib Installation and System Configuration
+Phase 3: Testing Hamlib Communication with rotctl
+Phase 4: The Successful Solution - Running rotctld as a Standalone Daemon
+Phase 5: Automating Daemon Control with a Bash Script
+Automated Setup Script
+Conclusion
+1. System and Software Overview
+Operating System: Ubuntu 25 (Plucky Puma)
+Rotator: MD-03 with SPID Rotator (configured for SPID ROT2 protocol mode)
+Control Software: Hamlib (libraries and utilities), Gpredict
+Connection: USB (emulating a serial port, e.g., /dev/ttyUSB0)
+2. Phase 1: Gpredict Initial Installation
+This section covers getting Gpredict itself installed on your system.
+
+Install Gpredict
+Bash
+
+sudo apt update
+sudo apt install gpredict
+Purpose: Updates package lists and installs the Gpredict satellite tracking application from Ubuntu's official repositories.
+How to Open Gpredict
+From the Applications Menu: Search for "Gpredict" and click its icon.
+From the Terminal:
+Bash
+
+gpredict
+3. Phase 2: Hamlib Installation and System Configuration
+This phase ensures Hamlib is installed, the serial port is identified, and your user has the necessary permissions to access it.
+
+Install Hamlib Utilities
+Bash
+
+sudo apt install libhamlib-utils
+Purpose: Installs Hamlib utilities, including rotctl and rotctld, along with core Hamlib libraries.
+Identify Your Rotator's Serial Port
+Unplug your MD-03's USB cable from the computer.
+Run the command below in a terminal:
+Bash
+
+sudo dmesg -w
+Purpose: Displays kernel messages in real-time.
+Plug in your MD-03's USB cable.
+Watch the terminal output for a line indicating a new serial port, typically starting with ttyUSB or ttyACM (e.g., ttyUSB0). Note this name.
+Press Ctrl+C to exit dmesg.
+Alternative Method (less detailed, but works):
+
+Bash
+
+ls /dev/ttyU* /dev/ttyA*
+# Note down the devices listed. Then plug in your MD-03 and run again. The new device is your port.
+Add Your User to the dialout Group
+This grants your user permission to access serial ports.
+
+Check your current groups:
+
+Bash
+
+groups
+If dialout is not listed, add your user:
+
+Bash
+
+sudo usermod -a -G dialout $USER
+Purpose: Adds your current user ($USER automatically expands to your username) to the dialout group.
+❗ CRITICAL MANUAL STEP ❗
+You MUST log out of your Ubuntu desktop session and then log back in (or reboot your computer) for the group membership change to take effect.
+
+4. Phase 3: Testing Hamlib Communication with rotctl
+This phase confirms that Hamlib can successfully communicate with your MD-03 via the serial port.
+
+Prepare MD-03 Controller
+Manual Step: Ensure your MD-03 controller's "PROT. AE:" setting is manually set to "SPID ROT2". Consult your MD-03 manual for how to change this setting.
+Find Hamlib Model ID for SPID ROT2
+Bash
+
+rotctl -l | grep -i spid
+Purpose: Lists Hamlib rotator models and filters for "spid". Look for an entry like "SPID MD-01/02 (ROT2 mode)". Note its corresponding numerical ID (commonly 903).
+Test Rotator Communication
+Open a new terminal.
+
+Run rotctl in interactive mode (replace <model_ID> and <serial_port> with your findings, 9600 is a common baud rate):
+
+Bash
+
+/usr/bin/rotctl -m <model_ID> -r <serial_port> -s 9600 -v
+Example: /usr/bin/rotctl -m 903 -r /dev/ttyUSB0 -s 9600 -v
+Purpose: Starts rotctl to attempt communication with your rotator.
+At the Rotator command: prompt:
+
+Type p (lowercase) and press Enter.
+Expected: The rotator should report its current Azimuth and Elevation.
+Purpose: Confirms read capability.
+Type P 10 10 (uppercase) and press Enter.
+Expected: The rotator should move to 10° Azimuth and 10° Elevation.
+Purpose: Confirms write/movement capability.
+Type q and press Enter to quit the rotctl session.
+Key Adjustment (if needed): If the rotator moves but its display is consistently "1 less than" the input, adjust your MD-03 controller's internal start/stop sequences to "immediate" (refer to your MD-03 manual). This resolves responsiveness issues.
+
+5. Phase 4: The Successful Solution - Running rotctld as a Standalone Daemon
+This method ensures Gpredict can communicate with your rotator by using a running rotctld daemon, bypassing Gpredict's direct Hamlib compilation issues.
+
+Start the rotctld Daemon (Manually)
+Open a NEW Terminal window. Keep this terminal open while you configure Gpredict and use it for tracking.
+
+Run the rotctld daemon with your confirmed working parameters:
+
+Bash
+
+/usr/bin/rotctld -m <model_ID> -r <serial_port> -s 9600 -T 127.0.0.1 -t 4533 -v
+Example: /usr/bin/rotctld -m 903 -r /dev/ttyUSB0 -s 9600 -T 127.0.0.1 -t 4533 -v
+Purpose: Starts rotctld as a server on your local machine (127.0.0.1) on port 4533, ready to receive commands and relay them to your rotator. The -v is for verbose output in this terminal, which is helpful for initial testing.
+Configure Gpredict to Connect to the Daemon
+Launch Gpredict.
+Go to Edit > Preferences.
+Select the Interfaces tab.
+In the "Rotators" section, click "New".
+In the "Rotator Type" dropdown, select "Hamlib Net rotator" (or similar "Network" option).
+Click "Configure".
+Set the following:
+Host: 127.0.0.1
+Port: 4533
+❗ CRITICAL ❗: Ensure the "Start daemon" checkbox is UNCHECKED. (You are starting rotctld manually).
+Click "OK" to save the interface settings.
+Go to the Antennas tab in Preferences.
+Select your antenna (e.g., "VHF/UHF Yagi").
+In the "Rotator" dropdown for your antenna, select the new "Hamlib Net rotator" interface you just created.
+Click "OK" to close Preferences.
+Close Gpredict after configuration.
+6. Phase 5: Automating Daemon Control with a Bash Script
+Since the rotctld daemon is not starting automatically on boot, this custom bash script provides a convenient way to launch and manage your setup.
+
+Create the Startup Script
+Open a text editor and create a new file:
+
+Bash
+
+nano ~/start_gpredict_rotator.sh
+(You can replace nano with gedit for a graphical editor).
+
+Paste the following content into the file. The configuration variables are set based on your successful setup.
+
+Bash
+
+#!/bin/bash
+
+# --- Configuration ---
+HAMLIB_MODEL="903"                # Your Hamlib rotator model (e.g., 903 for SPID ROT2)
+SERIAL_PORT="/dev/ttyUSB0"        # Your rotator's serial port
+BAUD_RATE="9600"                  # Your rotator's baud rate
+ROTCTLD_PORT="4533"               # The network port rotctld listens on
+GPREDICT_PATH="/usr/bin/gpredict" # Path to your Gpredict executable
+
+# --- Start Hamlib Rotator Daemon (rotctld) in background ---
+echo "Starting Hamlib rotctld daemon..."
+# The '> /dev/null 2>&1 &' part sends output to nowhere and runs in background.
+/usr/bin/rotctld -m "$HAMLIB_MODEL" -r "$SERIAL_PORT" -s "$BAUD_RATE" -T 127.0.0.1 -t "$ROTCTLD_PORT" > /dev/null 2>&1 &
+
+# Give rotctld a moment to start up
+sleep 2
+
+# --- Launch Gpredict ---
+echo "Launching Gpredict..."
+"$GPREDICT_PATH"
+
+echo "Gpredict closed. To stop rotctld, run 'pkill rotctld' in a terminal."
+Save the file and exit the editor.
+
+Make the script executable:
+
+Bash
+
+chmod +x ~/start_gpredict_rotator.sh
+Create a Rotator Park Script (Optional)
+This script allows you to send the rotator to a home/park position.
+
+Open a text editor and create a new file:
+
+Bash
+
+nano ~/park_rotator.sh
+Paste the following content:
+
+Bash
+
+#!/bin/bash
+
+# --- Configuration (Ensure these match your rotctld setup) ---
+ROTCTLD_HOST="127.0.0.1"
+ROTCTLD_PORT="4533"
+
+# --- Desired Park Position (Adjust these values as needed) ---
+PARK_AZIMUTH="0"
+PARK_ELEVATION="0" # Or 90 for zenith, or -5 for below horizon if supported
+
+# --- Send Park Command ---
+echo "Attempting to park rotator to Az: $PARK_AZIMUTH, El: $PARK_ELEVATION..."
+
+# Try connecting to the running rotctld daemon first
+if /usr/bin/rotctl -m 2 -r "$ROTCTLD_HOST":"$ROTCTLD_PORT" P "$PARK_AZIMUTH" "$PARK_ELEVATION" > /dev/null 2>&1; then
+    echo "Successfully sent park command via running rotctld daemon."
+else
+    # If connection to daemon failed, try directly to serial port (if daemon is not running)
+    echo "Rotctld daemon not found or connection failed. Attempting direct serial control..."
+    # Ensure these match your direct serial setup
+    HAMLIB_MODEL="903"
+    SERIAL_PORT="/dev/ttyUSB0"
+    BAUD_RATE="9600"
+
+    if /usr/bin/rotctl -m "$HAMLIB_MODEL" -r "$SERIAL_PORT" -s "$BAUD_RATE" P "$PARK_AZIMUTH" "$PARK_ELEVATION" > /dev/null 2>&1; then
+        echo "Successfully sent park command via direct serial."
+    else
+        echo "Failed to park rotator. Check connections and ensure Hamlib is not in conflict."
+        echo "You may need to manually stop rotctld first if it's in an unknown state."
+    fi
+fi
+Save the file and exit the editor.
+
+Make the script executable:
+
+Bash
+
+chmod +x ~/park_rotator.sh
